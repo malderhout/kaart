@@ -8,7 +8,7 @@ app.use(express.json());
 app.use(cors());
 
 // 🔗 Redis configuratie
-const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379";
+const REDIS_URL = process.env.REDIS_URL || "redis://red-d3l6jqruibrs73cer66g:6379";
 const GEO_KEY = "coordinates";
 
 const redis = createClient({
@@ -95,5 +95,6 @@ app.get("/api/near", async (req, res) => {
 });
 
 // 🔊 Start server
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 6379;
 app.listen(PORT, () => console.log(`✅ Server draait op poort ${PORT}`));
+
