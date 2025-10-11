@@ -1,0 +1,30 @@
+{
+  "name": "leaflet-redis-map",
+  "version": "1.0.0",
+  "description": "Backend API voor Leaflet-kaart met opslag van GIS-coördinaten in Redis",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "keywords": [
+    "leaflet",
+    "redis",
+    "express",
+    "gis",
+    "geospatial",
+    "map"
+  ],
+  "author": "Jouw Naam",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.1",
+    "redis": "^4.8.0",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  }
+}
