@@ -1,18 +1,17 @@
-// Importeer de benodigde packages: express voor de webserver en cors voor cross-origin requests.
+// Importeer de benodigde packages
 const express = require('express');
 const cors = require('cors');
-const redis = require('redis'); // Importeer de redis package
+const redis = require('redis');
+const path = require('path'); // Path module is nodig om bestanden te serveren
 
 // Initialiseer de Express applicatie
 const app = express();
-const port = 3000;
+// Render stelt de PORT omgevingsvariabele in. Gebruik die, of val terug op 3000 voor lokaal.
+const port = process.env.PORT || 3000;
 
 // --- REDIS CONNECTIE ---
-// De connectiegegevens worden uit de omgevingsvariabelen gehaald.
-// Dit is de veilige manier om met wachtwoorden en URLs om te gaan.
-// Op Render.com stel je een omgevingsvariabele in met de naam 'REDIS_URL'.
-// Het formaat is: redis://<gebruikersnaam>:<wachtwoord>@<host>:<poort>
-const redisUrl = process.env.REDIS_URL;
+// Het wordt aangeraden om process.env.REDIS_URL te gebruiken op Render.
+const redisUrl = process.env.REDIS_URL 
 let redisClient;
 
 (async () => {
@@ -31,13 +30,19 @@ let redisClient;
 })();
 // --------------------
 
-// Gebruik de CORS middleware om verzoeken van andere domeinen (zoals je HTML-bestand) toe te staan.
+// Gebruik de CORS middleware
 app.use(cors());
-// Gebruik de express.json() middleware om JSON-data in requests automatisch te parsen.
+// Gebruik de express.json() middleware om JSON-data te parsen
 app.use(express.json());
 
-// Dit is een simpele in-memory object als fallback als Redis niet beschikbaar is.
+// **NIEUW**: Serveer statische bestanden (zoals index.html)
+// Deze regel vertelt Express dat het de bestanden in de huidige map moet serveren.
+app.use(express.static(path.join(__dirname)));
+
+// Fallback in-memory opslag
 let markersStore = {};
+
+// --- API ROUTES ---
 
 // Definieer het endpoint om een vlaggetje op te slaan
 app.post('/api/save-marker', async (req, res) => {
@@ -54,10 +59,8 @@ app.post('/api/save-marker', async (req, res) => {
         timestamp: data.timestamp
     };
 
-    // Sla op in Redis als de connectie bestaat
     if (redisClient && redisClient.isReady) {
         try {
-            // Gebruik hSet om een hash op te slaan. Dit is efficiënt voor objecten.
             await redisClient.hSet(markerId, markerData);
             console.log(`Vlaggetje ${markerId} opgeslagen in Redis.`);
         } catch (err) {
@@ -65,7 +68,6 @@ app.post('/api/save-marker', async (req, res) => {
             return res.status(500).json({ status: 'error', message: 'Kon vlaggetje niet opslaan in Redis.' });
         }
     } else {
-        // Fallback naar in-memory opslag
         markersStore[markerId] = markerData;
         console.log(`Vlaggetje ${markerId} opgeslagen in geheugen (fallback).`);
     }
@@ -73,13 +75,13 @@ app.post('/api/save-marker', async (req, res) => {
     res.status(201).json({ status: 'success', message: 'Vlaggetje succesvol opgeslagen', markerId: markerId });
 });
 
-// NIEUW: Endpoint om alle opgeslagen vlaggetjes op te halen
+// Endpoint om alle opgeslagen vlaggetjes op te halen
 app.get('/api/markers', async (req, res) => {
     let allMarkers = {};
 
     if (redisClient && redisClient.isReady) {
         try {
-            const keys = await redisClient.keys('flag-*'); // Haal alle keys op die beginnen met 'flag-'
+            const keys = await redisClient.keys('flag-*'); 
             for (const key of keys) {
                 allMarkers[key] = await redisClient.hGetAll(key);
             }
@@ -89,7 +91,6 @@ app.get('/api/markers', async (req, res) => {
             return res.status(500).json({ status: 'error', message: 'Kon vlaggetjes niet ophalen uit Redis.' });
         }
     } else {
-        // Fallback naar in-memory opslag
         allMarkers = markersStore;
         console.log('Vlaggetjes opgehaald uit geheugen (fallback).');
     }
@@ -99,6 +100,5 @@ app.get('/api/markers', async (req, res) => {
 
 // Start de server
 app.listen(port, () => {
-    console.log(`Node.js server draait op http://kaart-server.onrender.com:${port}`);
-
+    console.log(`Node.js server draait op poort ${port}`);
 });
