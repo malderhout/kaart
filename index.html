@@ -7,7 +7,7 @@
     <!-- Tailwind CSS voor styling -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- LeafletJS voor de interactieve kaart -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha26-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
     <style>
         /* Zorg ervoor dat de kaart de volledige hoogte van het venster vult */
@@ -18,7 +18,7 @@
             padding: 0;
             font-family: 'Inter', sans-serif;
         }
-        /* AANGEPAST: Gebruik absolute positionering om de kaart het hele scherm te laten vullen. Dit lost het 'witte scherm'-probleem op. */
+        /* Gebruik absolute positionering om de kaart het hele scherm te laten vullen */
         #map {
             position: absolute;
             top: 0;
@@ -58,45 +58,50 @@
     </div>
 
     <script>
-        // Initialiseer de kaart en centreer deze op Nederland
-        const map = L.map('map').setView([52.3676, 4.9041], 8); // Coördinaten van Amsterdam, zoomniveau 8
-
-        // Voeg de kaartlaag toe (we gebruiken OpenStreetMap)
+        // --- INITIALISATIE ---
+        const map = L.map('map').setView([52.3676, 4.9041], 8);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         }).addTo(map);
 
-        // Referentie naar de lijst waar coördinaten worden weergegeven
         const coordinatesList = document.getElementById('coordinates-list');
         let markerCount = 0;
+        // Gebruik een variabele voor de backend URL voor eenvoudig aanpassen
+        const backendUrl = 'http://localhost:3000'; 
+
+        // --- EVENT LISTENERS ---
+        map.on('click', onMapClick);
+
+        // --- FUNCTIES ---
 
         // Functie die wordt aangeroepen wanneer op de kaart wordt geklikt
         function onMapClick(e) {
             markerCount++;
-            const lat = e.latlng.lat.toFixed(6); // Latitude met 6 decimalen
-            const lng = e.latlng.lng.toFixed(6); // Longitude met 6 decimalen
+            const lat = e.latlng.lat.toFixed(6);
+            const lng = e.latlng.lng.toFixed(6);
 
-            // Maak een nieuw vlaggetje (marker) op de geklikte locatie
-            const marker = L.marker(e.latlng).addTo(map)
-                .bindPopup(`<b>Vlag ${markerCount}</b><br>Lat: ${lat}<br>Lng: ${lng}`)
-                .openPopup();
-
+            // Maak een nieuw vlaggetje op de geklikte locatie
+            addMarkerToMap(lat, lng, markerCount);
+            
             // Toon de coördinaten in het informatiepaneel
             displayCoordinates(lat, lng, markerCount);
 
-            // SIMULATIE: Backend opslag
-            // Hier zou je een fetch() request naar je backend op Render.com maken
-            // om de coördinaten op te slaan in je key-value store of Redis.
+            // Stuur de coördinaten naar de backend
             saveCoordinatesToBackend(lat, lng, markerCount);
         }
 
-        // Voeg de 'click' event listener toe aan de kaart
-        map.on('click', onMapClick);
+        // Functie om een vlaggetje aan de kaart toe te voegen
+        function addMarkerToMap(lat, lng, id) {
+             L.marker([lat, lng]).addTo(map)
+                .bindPopup(`<b>Vlag ${id}</b><br>Lat: ${lat}<br>Lng: ${lng}`)
+                .openPopup();
+        }
 
         // Functie om de coördinaten in de UI te tonen
         function displayCoordinates(lat, lng, id) {
-            if (markerCount === 1) {
-                // Verwijder de initiële 'nog geen vlaggetjes' tekst
+            // Verwijder de initiële 'nog geen vlaggetjes' tekst als die er is
+            const placeholder = coordinatesList.querySelector('p.italic');
+            if (placeholder) {
                 coordinatesList.innerHTML = '';
             }
             const listItem = document.createElement('div');
@@ -105,7 +110,7 @@
             coordinatesList.appendChild(listItem);
         }
 
-        // Voorbeeld-functie om data naar een backend te sturen
+        // Functie om data naar de backend te sturen
         async function saveCoordinatesToBackend(lat, lng, id) {
             const data = {
                 id: `flag-${id}`,
@@ -115,16 +120,11 @@
             };
 
             console.log("Versturen naar backend:", data);
-
-            // FETCH CALL naar je lokale Node.js backend
-            // Wanneer je de app op Render.com publiceert, vervang je
-            // 'http://localhost:3000' met de URL van je Render-backend.
+            
             try {
-                const response = await fetch('http://kaart-server.onrender.com/api/save-marker', {
+                const response = await fetch(`${backendUrl}/api/save-marker`, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(data),
                 });
 
@@ -138,8 +138,54 @@
                 console.error('Netwerkfout:', error);
             }
         }
+        
+        // **NIEUW**: Functie om bestaande vlaggetjes van de backend te laden
+        async function loadExistingMarkers() {
+            console.log("Bestaande vlaggetjes laden...");
+            try {
+                const response = await fetch(`${backendUrl}/api/markers`);
+                if (!response.ok) {
+                    console.error('Kon vlaggetjes niet laden:', response.statusText);
+                    return;
+                }
+                const result = await response.json();
+                const markers = result.data;
+
+                let maxId = 0;
+                // Itereer over de objecten die van de backend komen
+                for (const key in markers) {
+                    const markerData = markers[key];
+                    const lat = parseFloat(markerData.latitude);
+                    const lng = parseFloat(markerData.longitude);
+                    // Haal het nummer uit de key (bijv. 'flag-5' -> 5)
+                    const id = parseInt(key.replace('flag-', ''));
+
+                    if (!isNaN(lat) && !isNaN(lng)) {
+                        // Plaats de vlag op de kaart en in de lijst
+                        addMarkerToMap(lat.toFixed(6), lng.toFixed(6), id);
+                        displayCoordinates(lat.toFixed(6), lng.toFixed(6), id);
+
+                        // Houd de hoogste ID bij om conflicten te voorkomen
+                        if (id > maxId) {
+                            maxId = id;
+                        }
+                    }
+                }
+                // Zet de teller op het hoogste gevonden nummer
+                markerCount = maxId;
+                console.log(`Laden voltooid. ${Object.keys(markers).length} vlaggetjes geplaatst.`);
+
+            } catch (error) {
+                console.error('Netwerkfout bij laden vlaggetjes:', error);
+                const list = document.getElementById('coordinates-list');
+                list.innerHTML = '<p class="text-sm text-red-500">Kon geen verbinding maken met de server.</p>';
+            }
+        }
+
+        // --- START APPLICATIE ---
+        // Roep de functie aan om de vlaggetjes te laden zodra de pagina klaar is.
+        loadExistingMarkers();
+
     </script>
 </body>
-
 </html>
-
