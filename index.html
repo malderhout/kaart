@@ -120,7 +120,7 @@
             // Wanneer je de app op Render.com publiceert, vervang je
             // 'http://localhost:3000' met de URL van je Render-backend.
             try {
-                const response = await fetch('http://localhost:3000/api/save-marker', {
+                const response = await fetch('http://kaart-server.onrender.com:3000/api/save-marker', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -140,4 +140,5 @@
         }
     </script>
 </body>
+
 </html>
