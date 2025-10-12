@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Plaats Vlaggetjes op de Kaart</title>
+    <!-- Tailwind CSS voor styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- LeafletJS voor de interactieve kaart -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+    <style>
+        /* Zorg ervoor dat de kaart de volledige hoogte van het venster vult */
+        html, body {
+            height: 100%;
+            width: 100%;
+            margin: 0;
+            padding: 0;
+            font-family: 'Inter', sans-serif;
+        }
+        /* AANGEPAST: Gebruik absolute positionering om de kaart het hele scherm te laten vullen. Dit lost het 'witte scherm'-probleem op. */
+        #map {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 1; /* Zorg ervoor dat de kaart onder andere elementen ligt */
+        }
+        /* Stijl voor de informatie-overlay */
+        .info-panel {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 1000; /* Zorgt ervoor dat het paneel boven de kaart ligt */
+            background: white;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            max-width: 350px;
+            max-height: calc(100vh - 20px);
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+
+    <!-- Dit element zal de kaart bevatten -->
+    <div id="map"></div>
+
+    <!-- Paneel om de coördinaten en instructies weer te geven -->
+    <div class="info-panel">
+        <h1 class="text-xl font-bold mb-2 text-gray-800">Vlag Plaatser</h1>
+        <p class="text-gray-600 mb-4">Klik op de kaart om een vlaggetje te plaatsen. De coördinaten verschijnen hieronder.</p>
+        <div id="coordinates-list" class="space-y-2">
+             <p class="text-sm text-gray-500 italic">Nog geen vlaggetjes geplaatst.</p>
+        </div>
+    </div>
+
+    <script>
+        // Initialiseer de kaart en centreer deze op Nederland
+        const map = L.map('map').setView([52.3676, 4.9041], 8); // Coördinaten van Amsterdam, zoomniveau 8
+
+        // Voeg de kaartlaag toe (we gebruiken OpenStreetMap)
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(map);
+
+        // Referentie naar de lijst waar coördinaten worden weergegeven
+        const coordinatesList = document.getElementById('coordinates-list');
+        let markerCount = 0;
+
+        // Functie die wordt aangeroepen wanneer op de kaart wordt geklikt
+        function onMapClick(e) {
+            markerCount++;
+            const lat = e.latlng.lat.toFixed(6); // Latitude met 6 decimalen
+            const lng = e.latlng.lng.toFixed(6); // Longitude met 6 decimalen
+
+            // Maak een nieuw vlaggetje (marker) op de geklikte locatie
+            const marker = L.marker(e.latlng).addTo(map)
+                .bindPopup(`<b>Vlag ${markerCount}</b><br>Lat: ${lat}<br>Lng: ${lng}`)
+                .openPopup();
+
+            // Toon de coördinaten in het informatiepaneel
+            displayCoordinates(lat, lng, markerCount);
+
+            // SIMULATIE: Backend opslag
+            // Hier zou je een fetch() request naar je backend op Render.com maken
+            // om de coördinaten op te slaan in je key-value store of Redis.
+            saveCoordinatesToBackend(lat, lng, markerCount);
+        }
+
+        // Voeg de 'click' event listener toe aan de kaart
+        map.on('click', onMapClick);
+
+        // Functie om de coördinaten in de UI te tonen
+        function displayCoordinates(lat, lng, id) {
+            if (markerCount === 1) {
+                // Verwijder de initiële 'nog geen vlaggetjes' tekst
+                coordinatesList.innerHTML = '';
+            }
+            const listItem = document.createElement('div');
+            listItem.className = 'p-2 bg-gray-100 rounded-md text-sm';
+            listItem.innerHTML = `<span class="font-semibold text-gray-700">Vlag ${id}:</span> <span class="font-mono">${lat}, ${lng}</span>`;
+            coordinatesList.appendChild(listItem);
+        }
+
+        // Voorbeeld-functie om data naar een backend te sturen
+        async function saveCoordinatesToBackend(lat, lng, id) {
+            const data = {
+                id: `flag-${id}`,
+                latitude: lat,
+                longitude: lng,
+                timestamp: new Date().toISOString()
+            };
+
+            console.log("Versturen naar backend:", data);
+
+            // FETCH CALL naar je lokale Node.js backend
+            // Wanneer je de app op Render.com publiceert, vervang je
+            // 'http://localhost:3000' met de URL van je Render-backend.
+            try {
+                const response = await fetch('http://localhost:3000/api/save-marker', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(data),
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    console.log('Succesvol opgeslagen:', result);
+                } else {
+                    console.error('Fout bij opslaan:', response.statusText);
+                }
+            } catch (error) {
+                console.error('Netwerkfout:', error);
+            }
+        }
+    </script>
+</body>
+</html>
