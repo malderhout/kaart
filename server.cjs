@@ -99,5 +99,6 @@ app.get('/api/markers', async (req, res) => {
 
 // Start de server
 app.listen(port, () => {
-    console.log(`Node.js server draait op http://localhost:${port}`);
+    console.log(`Node.js server draait op http://kaart-server.onrender.com:${port}`);
+
 });
