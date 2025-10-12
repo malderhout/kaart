@@ -66,8 +66,8 @@
 
         const coordinatesList = document.getElementById('coordinates-list');
         let markerCount = 0;
-        // Gebruik een variabele voor de backend URL voor eenvoudig aanpassen
-        const backendUrl = 'https://kaart-server.onrender.com/'; 
+        // Gebruik een lege string voor de backend URL. Dit maakt de paden relatief.
+        const backendUrl = ''; 
 
         // --- EVENT LISTENERS ---
         map.on('click', onMapClick);
@@ -122,6 +122,7 @@
             console.log("Versturen naar backend:", data);
             
             try {
+                // De URL is nu relatief, bijv. /api/save-marker
                 const response = await fetch(`${backendUrl}/api/save-marker`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -143,6 +144,7 @@
         async function loadExistingMarkers() {
             console.log("Bestaande vlaggetjes laden...");
             try {
+                // De URL is nu relatief, bijv. /api/markers
                 const response = await fetch(`${backendUrl}/api/markers`);
                 if (!response.ok) {
                     console.error('Kon vlaggetjes niet laden:', response.statusText);
@@ -188,5 +190,4 @@
 
     </script>
 </body>
-
 </html>
