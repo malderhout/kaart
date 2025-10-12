@@ -1,17 +1,13 @@
-// Importeer de benodigde packages
 const express = require('express');
 const cors = require('cors');
 const redis = require('redis');
-const path = require('path'); // Path module is nodig om bestanden te serveren
+const path = require('path');
 
-// Initialiseer de Express applicatie
 const app = express();
-// Render stelt de PORT omgevingsvariabele in. Gebruik die, of val terug op 3000 voor lokaal.
 const port = process.env.PORT || 3000;
 
 // --- REDIS CONNECTIE ---
-// Het wordt aangeraden om process.env.REDIS_URL te gebruiken op Render.
-const redisUrl = process.env.REDIS_URL 
+const redisUrl = process.env.REDIS_URL; 
 let redisClient;
 
 (async () => {
@@ -23,20 +19,15 @@ let redisClient;
             console.log('Succesvol verbonden met Redis.');
         } catch (err) {
             console.error('Kon niet verbinden met Redis:', err);
+            redisClient = null; // Zorg ervoor dat we de client niet gebruiken als de connectie faalt
         }
     } else {
         console.warn('REDIS_URL is niet ingesteld. Data wordt alleen in het geheugen opgeslagen.');
     }
 })();
-// --------------------
 
-// Gebruik de CORS middleware
 app.use(cors());
-// Gebruik de express.json() middleware om JSON-data te parsen
 app.use(express.json());
-
-// **NIEUW**: Serveer statische bestanden (zoals index.html)
-// Deze regel vertelt Express dat het de bestanden in de huidige map moet serveren.
 app.use(express.static(path.join(__dirname)));
 
 // Fallback in-memory opslag
@@ -44,61 +35,54 @@ let markersStore = {};
 
 // --- API ROUTES ---
 
-// Definieer het endpoint om een vlaggetje op te slaan
+// POST: Sla een vlaggetje op
 app.post('/api/save-marker', async (req, res) => {
     const data = req.body;
-
-    if (!data || !data.latitude || !data.longitude || !data.id) {
-        return res.status(400).json({ status: 'error', message: 'Ongeldige data. Vereist: id, latitude, longitude.' });
+    if (!data || !data.id || !data.latitude || !data.longitude) {
+        return res.status(400).json({ status: 'error', message: 'Ongeldige data.' });
     }
-
-    const markerId = data.id;
-    const markerData = {
-        latitude: data.latitude,
-        longitude: data.longitude,
-        timestamp: data.timestamp
-    };
-
+    
     if (redisClient && redisClient.isReady) {
-        try {
-            await redisClient.hSet(markerId, markerData);
-            console.log(`Vlaggetje ${markerId} opgeslagen in Redis.`);
-        } catch (err) {
-            console.error('Redis fout bij opslaan:', err);
-            return res.status(500).json({ status: 'error', message: 'Kon vlaggetje niet opslaan in Redis.' });
-        }
+        await redisClient.hSet(data.id, {
+            latitude: data.latitude,
+            longitude: data.longitude,
+            timestamp: data.timestamp
+        });
     } else {
-        markersStore[markerId] = markerData;
-        console.log(`Vlaggetje ${markerId} opgeslagen in geheugen (fallback).`);
+        markersStore[data.id] = data;
     }
-
-    res.status(201).json({ status: 'success', message: 'Vlaggetje succesvol opgeslagen', markerId: markerId });
+    res.status(201).json({ status: 'success', message: 'Vlaggetje opgeslagen' });
 });
 
-// Endpoint om alle opgeslagen vlaggetjes op te halen
+// GET: Haal alle vlaggetjes op
 app.get('/api/markers', async (req, res) => {
     let allMarkers = {};
-
     if (redisClient && redisClient.isReady) {
-        try {
-            const keys = await redisClient.keys('flag-*'); 
-            for (const key of keys) {
-                allMarkers[key] = await redisClient.hGetAll(key);
-            }
-            console.log(`${keys.length} vlaggetjes opgehaald uit Redis.`);
-        } catch (err) {
-            console.error('Redis fout bij ophalen:', err);
-            return res.status(500).json({ status: 'error', message: 'Kon vlaggetjes niet ophalen uit Redis.' });
+        const keys = await redisClient.keys('flag-*');
+        for (const key of keys) {
+            allMarkers[key] = await redisClient.hGetAll(key);
         }
     } else {
         allMarkers = markersStore;
-        console.log('Vlaggetjes opgehaald uit geheugen (fallback).');
     }
-
     res.status(200).json({ status: 'success', data: allMarkers });
 });
 
-// Start de server
+// **NIEUW**: DELETE: Verwijder alle vlaggetjes
+app.delete('/api/markers', async (req, res) => {
+    if (redisClient && redisClient.isReady) {
+        const keys = await redisClient.keys('flag-*');
+        if (keys.length > 0) {
+            await redisClient.del(keys);
+        }
+        console.log(`${keys.length} vlaggetjes verwijderd uit Redis.`);
+    } else {
+        markersStore = {}; // Reset de in-memory store
+        console.log('Alle vlaggetjes verwijderd uit geheugen (fallback).');
+    }
+    res.status(200).json({ status: 'success', message: 'Alle vlaggetjes zijn succesvol verwijderd.' });
+});
+
 app.listen(port, () => {
     console.log(`Node.js server draait op poort ${port}`);
 });

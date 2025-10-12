@@ -10,186 +10,186 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha26-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
     <style>
-        /* Zorg ervoor dat de kaart de volledige hoogte van het venster vult */
         html, body {
             height: 100%;
             width: 100%;
             margin: 0;
             padding: 0;
             font-family: 'Inter', sans-serif;
+            overflow: hidden; /* Voorkomt scrollen op de body */
         }
-        /* Gebruik absolute positionering om de kaart het hele scherm te laten vullen */
         #map {
             position: absolute;
             top: 0;
             left: 0;
             right: 0;
             bottom: 0;
-            z-index: 1; /* Zorg ervoor dat de kaart onder andere elementen ligt */
+            z-index: 1;
         }
-        /* Stijl voor de informatie-overlay */
-        .info-panel {
+        /* Nieuw controlepaneel onderaan */
+        .control-panel {
             position: absolute;
-            top: 10px;
-            right: 10px;
-            z-index: 1000; /* Zorgt ervoor dat het paneel boven de kaart ligt */
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000; /* Boven de kaart */
             background: white;
-            padding: 1rem;
-            border-radius: 0.5rem;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-            max-width: 350px;
-            max-height: calc(100vh - 20px);
+            padding: 0.75rem;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            width: 90%;
+            max-width: 500px;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        /* Stijl voor de coördinatenlijst in het paneel */
+        #coordinates-list {
+            max-height: 100px;
             overflow-y: auto;
+            font-size: 0.875rem;
         }
     </style>
 </head>
 <body class="bg-gray-100">
 
-    <!-- Dit element zal de kaart bevatten -->
     <div id="map"></div>
 
-    <!-- Paneel om de coördinaten en instructies weer te geven -->
-    <div class="info-panel">
-        <h1 class="text-xl font-bold mb-2 text-gray-800">Vlag Plaatser</h1>
-        <p class="text-gray-600 mb-4">Klik op de kaart om een vlaggetje te plaatsen. De coördinaten verschijnen hieronder.</p>
-        <div id="coordinates-list" class="space-y-2">
-             <p class="text-sm text-gray-500 italic">Nog geen vlaggetjes geplaatst.</p>
+    <!-- Responsive controlepaneel onderaan -->
+    <div class="control-panel">
+        <div id="coordinates-list" class="space-y-2 bg-gray-50 p-2 rounded-md">
+             <p class="text-sm text-gray-500 italic">Klik op de kaart om een vlag te plaatsen.</p>
         </div>
+        <button id="delete-all-btn" class="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-md transition-colors duration-200">
+            Verwijder alle vlaggen
+        </button>
     </div>
 
     <script>
-        // --- INITIALISATIE ---
         const map = L.map('map').setView([52.3676, 4.9041], 8);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         }).addTo(map);
 
         const coordinatesList = document.getElementById('coordinates-list');
+        const deleteAllBtn = document.getElementById('delete-all-btn');
         let markerCount = 0;
-        // Gebruik een lege string voor de backend URL. Dit maakt de paden relatief.
+        let markersOnMap = []; // Array om L.marker objecten bij te houden
         const backendUrl = 'https://kaart-server.onrender.com'; 
 
         // --- EVENT LISTENERS ---
         map.on('click', onMapClick);
+        deleteAllBtn.addEventListener('click', confirmDeleteAllMarkers);
 
         // --- FUNCTIES ---
 
-        // Functie die wordt aangeroepen wanneer op de kaart wordt geklikt
         function onMapClick(e) {
             markerCount++;
             const lat = e.latlng.lat.toFixed(6);
             const lng = e.latlng.lng.toFixed(6);
-
-            // Maak een nieuw vlaggetje op de geklikte locatie
             addMarkerToMap(lat, lng, markerCount);
-            
-            // Toon de coördinaten in het informatiepaneel
             displayCoordinates(lat, lng, markerCount);
-
-            // Stuur de coördinaten naar de backend
             saveCoordinatesToBackend(lat, lng, markerCount);
         }
 
-        // Functie om een vlaggetje aan de kaart toe te voegen
         function addMarkerToMap(lat, lng, id) {
-             L.marker([lat, lng]).addTo(map)
-                .bindPopup(`<b>Vlag ${id}</b><br>Lat: ${lat}<br>Lng: ${lng}`)
-                .openPopup();
+             const newMarker = L.marker([lat, lng]).addTo(map)
+                .bindPopup(`<b>Vlag ${id}</b><br>Lat: ${lat}<br>Lng: ${lng}`);
+             markersOnMap.push(newMarker); // Voeg marker toe aan de array
+             return newMarker;
         }
 
-        // Functie om de coördinaten in de UI te tonen
         function displayCoordinates(lat, lng, id) {
-            // Verwijder de initiële 'nog geen vlaggetjes' tekst als die er is
             const placeholder = coordinatesList.querySelector('p.italic');
             if (placeholder) {
                 coordinatesList.innerHTML = '';
             }
             const listItem = document.createElement('div');
-            listItem.className = 'p-2 bg-gray-100 rounded-md text-sm';
-            listItem.innerHTML = `<span class="font-semibold text-gray-700">Vlag ${id}:</span> <span class="font-mono">${lat}, ${lng}</span>`;
+            listItem.className = 'text-gray-700';
+            listItem.innerHTML = `<span class="font-semibold">Vlag ${id}:</span> <span class="font-mono">${lat}, ${lng}</span>`;
             coordinatesList.appendChild(listItem);
         }
 
-        // Functie om data naar de backend te sturen
         async function saveCoordinatesToBackend(lat, lng, id) {
-            const data = {
-                id: `flag-${id}`,
-                latitude: lat,
-                longitude: lng,
-                timestamp: new Date().toISOString()
-            };
-
-            console.log("Versturen naar backend:", data);
-            
+            const data = { id: `flag-${id}`, latitude: lat, longitude: lng, timestamp: new Date().toISOString() };
             try {
-                // De URL is nu relatief, bijv. /api/save-marker
                 const response = await fetch(`${backendUrl}/api/save-marker`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(data),
                 });
-
-                if (response.ok) {
-                    const result = await response.json();
-                    console.log('Succesvol opgeslagen:', result);
-                } else {
-                    console.error('Fout bij opslaan:', response.statusText);
-                }
+                if (!response.ok) console.error('Fout bij opslaan:', response.statusText);
             } catch (error) {
                 console.error('Netwerkfout:', error);
             }
         }
         
-        // **NIEUW**: Functie om bestaande vlaggetjes van de backend te laden
         async function loadExistingMarkers() {
-            console.log("Bestaande vlaggetjes laden...");
             try {
-                // De URL is nu relatief, bijv. /api/markers
                 const response = await fetch(`${backendUrl}/api/markers`);
-                if (!response.ok) {
-                    console.error('Kon vlaggetjes niet laden:', response.statusText);
-                    return;
-                }
+                if (!response.ok) return;
                 const result = await response.json();
                 const markers = result.data;
-
                 let maxId = 0;
-                // Itereer over de objecten die van de backend komen
                 for (const key in markers) {
                     const markerData = markers[key];
-                    const lat = parseFloat(markerData.latitude);
-                    const lng = parseFloat(markerData.longitude);
-                    // Haal het nummer uit de key (bijv. 'flag-5' -> 5)
                     const id = parseInt(key.replace('flag-', ''));
-
-                    if (!isNaN(lat) && !isNaN(lng)) {
-                        // Plaats de vlag op de kaart en in de lijst
-                        addMarkerToMap(lat.toFixed(6), lng.toFixed(6), id);
-                        displayCoordinates(lat.toFixed(6), lng.toFixed(6), id);
-
-                        // Houd de hoogste ID bij om conflicten te voorkomen
-                        if (id > maxId) {
-                            maxId = id;
-                        }
-                    }
+                    addMarkerToMap(markerData.latitude, markerData.longitude, id);
+                    displayCoordinates(markerData.latitude, markerData.longitude, id);
+                    if (id > maxId) maxId = id;
                 }
-                // Zet de teller op het hoogste gevonden nummer
                 markerCount = maxId;
-                console.log(`Laden voltooid. ${Object.keys(markers).length} vlaggetjes geplaatst.`);
-
             } catch (error) {
-                console.error('Netwerkfout bij laden vlaggetjes:', error);
-                const list = document.getElementById('coordinates-list');
-                list.innerHTML = '<p class="text-sm text-red-500">Kon geen verbinding maken met de server.</p>';
+                coordinatesList.innerHTML = '<p class="text-sm text-red-500">Kon server niet bereiken.</p>';
             }
         }
 
-        // --- START APPLICATIE ---
-        // Roep de functie aan om de vlaggetjes te laden zodra de pagina klaar is.
-        loadExistingMarkers();
+        function confirmDeleteAllMarkers() {
+            // Gebruik geen native confirm(), maak een custom melding.
+            deleteAllBtn.textContent = 'Weet je het zeker?';
+            deleteAllBtn.classList.replace('bg-red-500', 'bg-yellow-500');
+            deleteAllBtn.classList.replace('hover:bg-red-600', 'hover:bg-yellow-600');
+            
+            // Verander de functie van de knop tijdelijk
+            deleteAllBtn.onclick = async () => {
+                await deleteAllMarkers();
+                // Herstel de knop
+                deleteAllBtn.textContent = 'Verwijder alle vlaggen';
+                deleteAllBtn.classList.replace('bg-yellow-500', 'bg-red-500');
+                deleteAllBtn.classList.replace('hover:bg-yellow-600', 'hover:bg-red-600');
+                deleteAllBtn.onclick = confirmDeleteAllMarkers; // Zet de oorspronkelijke listener terug
+            };
 
+            // Voeg een timeout toe om de knop te herstellen als er niet wordt geklikt
+            setTimeout(() => {
+                if (deleteAllBtn.textContent === 'Weet je het zeker?') {
+                    deleteAllBtn.textContent = 'Verwijder alle vlaggen';
+                    deleteAllBtn.classList.replace('bg-yellow-500', 'bg-red-500');
+                    deleteAllBtn.classList.replace('hover:bg-yellow-600', 'hover:bg-red-600');
+                    deleteAllBtn.onclick = confirmDeleteAllMarkers;
+                }
+            }, 3000);
+        }
+
+        async function deleteAllMarkers() {
+            try {
+                const response = await fetch(`${backendUrl}/api/markers`, { method: 'DELETE' });
+                if (response.ok) {
+                    // Verwijder markers van de kaart
+                    markersOnMap.forEach(marker => map.removeLayer(marker));
+                    markersOnMap = []; // Leeg de array
+                    // Reset de UI
+                    coordinatesList.innerHTML = '<p class="text-sm text-gray-500 italic">Alle vlaggen zijn verwijderd.</p>';
+                    markerCount = 0;
+                } else {
+                    console.error('Fout bij verwijderen:', response.statusText);
+                }
+            } catch (error) {
+                console.error('Netwerkfout bij verwijderen:', error);
+            }
+        }
+
+        loadExistingMarkers();
     </script>
 </body>
-
 </html>
-
