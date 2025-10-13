@@ -5,8 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Teken Vlakken op de Kaart</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- LeafletJS CSS & JS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha26-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+    <!-- Leaflet.draw Plugin CSS & JS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+
     <style>
         html, body {
             height: 100%;
@@ -38,12 +45,7 @@
             max-width: 500px;
             display: flex;
             flex-direction: column;
-            gap: 0.75rem; /* Iets meer ruimte */
-        }
-        #info-list {
-            max-height: 100px;
-            overflow-y: auto;
-            font-size: 0.875rem;
+            gap: 0.75rem;
         }
     </style>
 </head>
@@ -52,14 +54,9 @@
     <div id="map"></div>
 
     <div class="control-panel">
-        <button id="draw-btn" class="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-md transition-colors duration-200">
-            Teken een vlak
-        </button>
-        <!-- Nieuw invoerveld voor projectnaam -->
         <input type="text" id="project-name-input" placeholder="Projectnaam..." class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-        
         <div id="info-list" class="space-y-2 bg-gray-50 p-2 rounded-md text-center">
-             <p class="text-sm text-gray-500 italic">Klik hierboven om de tekenmodus te starten.</p>
+             <p class="text-sm text-gray-500 italic">Gebruik de toolbar op de kaart om te tekenen.</p>
         </div>
         <button id="delete-all-btn" class="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-md transition-colors duration-200">
             Verwijder alle vlakken
@@ -74,125 +71,57 @@
 
         const infoList = document.getElementById('info-list');
         const deleteAllBtn = document.getElementById('delete-all-btn');
-        const drawBtn = document.getElementById('draw-btn');
-        const projectNameInput = document.getElementById('project-name-input'); // Referentie naar input
+        const projectNameInput = document.getElementById('project-name-input');
         const backendUrl = 'https://kaart-server.onrender.com';
 
-        let polygonLayers = [];
-        let isDrawing = false;
-        let drawingState = 'idle'; // 'idle', 'defineCenter', 'defineSize', 'defineRotation'
-        let centerPoint = null;
-        let sizeDefiningPoint = null;
-        let tempPolygon = null;
+        const drawnItems = new L.FeatureGroup();
+        map.addLayer(drawnItems);
+
+        // --- Leaflet.draw Configuratie ---
+        const drawControl = new L.Control.Draw({
+            edit: {
+                featureGroup: drawnItems,
+                remove: true, // Zet verwijderen AAN
+                edit: false   // Bewerken blijft voor eenvoud uit
+            },
+            draw: {
+                polyline: false, marker: false, circlemarker: false, circle: false,
+                polygon: { allowIntersection: false, shapeOptions: { color: '#e53e3e' } },
+                rectangle: { shapeOptions: { color: '#e53e3e' } }
+            }
+        });
+        map.addControl(drawControl);
 
         // --- EVENT LISTENERS ---
-        drawBtn.addEventListener('click', toggleDrawing);
+        map.on(L.Draw.Event.CREATED, (event) => {
+            const layer = event.layer;
+            const points = layer.getLatLngs()[0].map(p => ({ lat: p.lat, lng: p.lng }));
+            const projectName = projectNameInput.value || 'N.v.t.';
+            savePolygon(points, projectName);
+        });
+        
+        // Nieuw event voor het verwijderen van lagen
+        map.on(L.Draw.Event.DELETED, (event) => {
+            event.layers.eachLayer(layer => {
+                if (layer.backendId) {
+                    deleteSinglePolygonFromBackend(layer.backendId);
+                }
+            });
+        });
+        
         deleteAllBtn.addEventListener('click', confirmDeleteAll);
-        map.on('click', onMapClick);
-        map.on('mousemove', onMouseMove);
 
         // --- FUNCTIES ---
-        function toggleDrawing() {
-            if (!isDrawing) {
-                isDrawing = true;
-                drawingState = 'defineCenter';
-                drawBtn.textContent = 'Annuleer tekenen';
-                drawBtn.classList.replace('bg-blue-500', 'bg-yellow-500');
-                drawBtn.classList.replace('hover:bg-blue-600', 'hover:bg-yellow-600');
-                infoList.innerHTML = '<p class="text-sm text-blue-600">Klik op de kaart om het middelpunt te bepalen.</p>';
-            } else {
-                resetDrawingState();
-            }
-        }
-        
-        function onMouseMove(e) {
-            if (!isDrawing) return;
 
-            switch(drawingState) {
-                case 'defineSize': {
-                    if (!centerPoint) return;
-                    const width = Math.abs(centerPoint.lng - e.latlng.lng) * 2;
-                    const height = Math.abs(centerPoint.lat - e.latlng.lat) * 2;
-                    const corners = getRotatedRectanglePoints(centerPoint, width, height, 0);
-                    updateTempPolygon(corners);
-                    break;
-                }
-                case 'defineRotation': {
-                    if (!centerPoint || !sizeDefiningPoint) return;
-                    const width = Math.abs(centerPoint.lng - sizeDefiningPoint.lng) * 2;
-                    const height = Math.abs(centerPoint.lat - sizeDefiningPoint.lat) * 2;
-                    
-                    const centerPx = map.latLngToContainerPoint(centerPoint);
-                    const mousePx = map.latLngToContainerPoint(e.latlng);
-                    const angleRad = Math.atan2(mousePx.y - centerPx.y, mousePx.x - centerPx.x);
-                    
-                    const corners = getRotatedRectanglePoints(centerPoint, width, height, angleRad);
-                    updateTempPolygon(corners);
-                    break;
-                }
-            }
-        }
-
-        function onMapClick(e) {
-            if (!isDrawing) return;
-            switch (drawingState) {
-                case 'defineCenter':
-                    centerPoint = e.latlng;
-                    drawingState = 'defineSize';
-                    infoList.innerHTML = '<p class="text-sm text-blue-600">Beweeg de muis voor de grootte en klik om te bevestigen.</p>';
-                    break;
-                case 'defineSize':
-                    sizeDefiningPoint = e.latlng;
-                    drawingState = 'defineRotation';
-                    infoList.innerHTML = '<p class="text-sm text-blue-600">Beweeg de muis om te roteren en klik om op te slaan.</p>';
-                    break;
-                case 'defineRotation':
-                    const finalPoints = tempPolygon.getLatLngs()[0].map(p => ({ lat: p.lat, lng: p.lng }));
-                    const projectName = projectNameInput.value || 'N.v.t.'; // Lees projectnaam
-                    savePolygon(finalPoints, projectName);
-                    resetDrawingState();
-                    break;
-            }
-        }
-
-        function updateTempPolygon(corners) {
-            if (tempPolygon) {
-                tempPolygon.setLatLngs(corners);
-            } else {
-                tempPolygon = L.polygon(corners, { color: 'blue', weight: 2, dashArray: '5, 5', fill: false }).addTo(map);
-            }
-        }
-        
-        function getRotatedRectanglePoints(center, width, height, angleRad) {
-            const hw = width / 2;
-            const hh = height / 2;
+        function addPolygonToMap(points, id, projectName) {
+            const layer = L.polygon(points.map(p => [p.lat, p.lng]), { color: '#e53e3e' })
+                .bindPopup(`<b>Project:</b> ${projectName || 'N.v.t.'}<br><b>Vlak ID:</b> ${id}`);
             
-            const corners = [
-                {x: -hw, y: -hh}, {x: hw, y: -hh},
-                {x: hw, y: hh},   {x: -hw, y: hh}
-            ];
+            // Koppel het backend ID aan de kaartlaag
+            layer.backendId = `polygon-${id}`;
             
-            return corners.map(p => {
-                const rotatedX = p.x * Math.cos(angleRad) - p.y * Math.sin(angleRad);
-                const rotatedY = p.x * Math.sin(angleRad) + p.y * Math.cos(angleRad);
-                return L.latLng(center.lat + rotatedY, center.lng + rotatedX);
-            });
-        }
-
-        function resetDrawingState() {
-            isDrawing = false;
-            drawingState = 'idle';
-            centerPoint = null;
-            sizeDefiningPoint = null;
-            if (tempPolygon) {
-                map.removeLayer(tempPolygon);
-                tempPolygon = null;
-            }
-            drawBtn.textContent = 'Teken een vlak';
-            drawBtn.disabled = false;
-            drawBtn.classList.replace('bg-yellow-500', 'bg-blue-500');
-            drawBtn.classList.replace('hover:bg-yellow-600', 'hover:bg-blue-600');
-            infoList.innerHTML = '<p class="text-sm text-gray-500 italic">Klik hierboven om de tekenmodus te starten.</p>';
+            drawnItems.addLayer(layer);
+            return layer;
         }
 
         async function savePolygon(points, projectName) {
@@ -200,39 +129,42 @@
             if (newPolygonData && newPolygonData.id) {
                 const id = parseInt(newPolygonData.id.replace('polygon-', ''));
                 addPolygonToMap(newPolygonData.points, id, newPolygonData.projectName);
-                displayPolygonInfo(id, newPolygonData.projectName);
+                displayPolygonInfo(id, projectName);
+                projectNameInput.value = '';
             }
         }
 
-        function addPolygonToMap(points, id, projectName) {
-            const leafletPoints = points.map(p => [p.lat, p.lng]);
-            const polygon = L.polygon(leafletPoints, { color: '#e53e3e' }).addTo(map)
-                .bindPopup(`<b>Project:</b> ${projectName || 'N.v.t.'}<br><b>Vlak ID:</b> ${id}`);
-            polygonLayers.push(polygon);
-        }
-
         function displayPolygonInfo(id, projectName) {
-            const placeholder = infoList.querySelector('p.italic');
-            if (placeholder) infoList.innerHTML = '';
-            const listItem = document.createElement('div');
-            listItem.className = 'text-gray-700';
-            listItem.innerHTML = `<span class="font-semibold">Vlak ${id} (${projectName || 'N.v.t.'}) opgeslagen</span>`;
-            infoList.appendChild(listItem);
+            infoList.innerHTML = `<p class="font-semibold text-gray-700">Vlak ${id} (${projectName || 'N.v.t.'}) opgeslagen</p>`;
         }
-
+        
         async function savePolygonToBackend(points, projectName) {
             try {
                 const response = await fetch(`${backendUrl}/api/save-polygon`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ points: points, projectName: projectName }), // Stuur projectnaam mee
+                    body: JSON.stringify({ points, projectName }),
                 });
                 if (!response.ok) throw new Error(response.statusText);
                 return (await response.json()).data;
             } catch (error) {
                 console.error('Fout bij opslaan:', error);
-                infoList.innerHTML = '<p class="text-sm text-red-500">Opslaan mislukt. Controleer de server.</p>';
+                infoList.innerHTML = '<p class="text-sm text-red-500">Opslaan mislukt.</p>';
                 return null;
+            }
+        }
+        
+        // Nieuwe functie om één polygoon te verwijderen
+        async function deleteSinglePolygonFromBackend(polygonId) {
+            try {
+                const response = await fetch(`${backendUrl}/api/polygons/${polygonId}`, {
+                    method: 'DELETE',
+                });
+                 if (!response.ok) throw new Error(response.statusText);
+                infoList.innerHTML = `<p class="font-semibold text-gray-700">Vlak ${polygonId.replace('polygon-','')} verwijderd.</p>`;
+            } catch (error) {
+                console.error(`Fout bij verwijderen van ${polygonId}:`, error);
+                infoList.innerHTML = '<p class="text-sm text-red-500">Verwijderen mislukt.</p>';
             }
         }
 
@@ -255,12 +187,10 @@
         function confirmDeleteAll() {
              deleteAllBtn.textContent = 'Weet je het zeker?';
              deleteAllBtn.classList.replace('bg-red-500', 'bg-yellow-500');
-             deleteAllBtn.classList.replace('hover:bg-red-600', 'hover:bg-yellow-600');
              deleteAllBtn.onclick = async () => {
                  await deleteAllPolygons();
                  deleteAllBtn.textContent = 'Verwijder alle vlakken';
                  deleteAllBtn.classList.replace('bg-yellow-500', 'bg-red-500');
-                 deleteAllBtn.classList.replace('hover:bg-yellow-600', 'hover:bg-red-600');
                  deleteAllBtn.onclick = confirmDeleteAll;
              };
         }
@@ -269,8 +199,7 @@
             try {
                 const response = await fetch(`${backendUrl}/api/polygons`, { method: 'DELETE' });
                 if (response.ok) {
-                    polygonLayers.forEach(layer => map.removeLayer(layer));
-                    polygonLayers = [];
+                    drawnItems.clearLayers();
                     infoList.innerHTML = '<p class="text-sm text-gray-500 italic">Alle vlakken zijn verwijderd.</p>';
                 }
             } catch (error) {

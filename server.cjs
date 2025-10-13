@@ -6,16 +6,12 @@ const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware
 app.use(cors());
 app.use(express.json());
 
-// Redis Client Setup
 const redisUrl = process.env.REDIS_URL;
 let client;
 let isRedisConnected = false;
-
-// In-memory fallback
 let memoryStorage = {};
 let memoryCounter = 0;
 
@@ -39,7 +35,6 @@ let memoryCounter = 0;
     }
 })();
 
-// Serve de frontend
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
@@ -47,45 +42,34 @@ app.get('/', (req, res) => {
 
 // --- API ROUTES ---
 
-// Sla een nieuwe polygoon op
 app.post('/api/save-polygon', async (req, res) => {
-    const { points, projectName } = req.body; // Haal projectnaam uit de body
-
+    const { points, projectName } = req.body;
     if (!points || !Array.isArray(points) || points.length < 3) {
         return res.status(400).json({ message: 'Invalid polygon data provided.' });
     }
-
     try {
         let newId;
-        const dataToStore = JSON.stringify({ points, projectName: projectName || 'N.v.t.' }); // Sla object op
-
+        const dataToStore = JSON.stringify({ points, projectName: projectName || 'N.v.t.' });
         if (isRedisConnected) {
             newId = await client.incr('polygon_id_counter');
-            const polygonKey = `polygon-${newId}`;
-            await client.hSet('polygons', polygonKey, dataToStore);
+            await client.hSet('polygons', `polygon-${newId}`, dataToStore);
         } else {
             newId = ++memoryCounter;
-            const polygonKey = `polygon-${newId}`;
-            memoryStorage[polygonKey] = JSON.parse(dataToStore);
+            memoryStorage[`polygon-${newId}`] = JSON.parse(dataToStore);
         }
-        
         const responseData = { id: `polygon-${newId}`, points, projectName: projectName || 'N.v.t.' };
         res.status(201).json({ message: 'Polygon saved!', data: responseData });
-
     } catch (error) {
         console.error('Error saving polygon:', error);
         res.status(500).json({ message: 'Failed to save polygon.' });
     }
 });
 
-
-// Haal alle polygonen op
 app.get('/api/polygons', async (req, res) => {
     try {
         let polygons = {};
         if (isRedisConnected) {
             const redisPolygons = await client.hGetAll('polygons');
-            // Parse de JSON strings terug naar objecten
             for (const key in redisPolygons) {
                 polygons[key] = JSON.parse(redisPolygons[key]);
             }
@@ -99,7 +83,22 @@ app.get('/api/polygons', async (req, res) => {
     }
 });
 
-// Verwijder alle polygonen
+// Nieuwe route om één polygoon te verwijderen
+app.delete('/api/polygons/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+        if (isRedisConnected) {
+            await client.hDel('polygons', id);
+        } else {
+            delete memoryStorage[id];
+        }
+        res.status(200).json({ message: `Polygon ${id} deleted.` });
+    } catch (error) {
+        console.error(`Error deleting polygon ${id}:`, error);
+        res.status(500).json({ message: `Failed to delete polygon ${id}.` });
+    }
+});
+
 app.delete('/api/polygons', async (req, res) => {
     try {
         if (isRedisConnected) {
@@ -116,8 +115,6 @@ app.delete('/api/polygons', async (req, res) => {
     }
 });
 
-
-// Start de server
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server is running on port ${PORT}`);
 });
