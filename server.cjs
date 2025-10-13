@@ -4,100 +4,120 @@ const redis = require('redis');
 const path = require('path');
 
 const app = express();
-const port = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3000;
 
-// --- REDIS CONNECTIE ---
-const redisUrl = process.env.REDIS_URL; 
-let redisClient;
+// Middleware
+app.use(cors());
+app.use(express.json());
+
+// Redis Client Setup
+const redisUrl = process.env.REDIS_URL;
+let client;
+let isRedisConnected = false;
+
+// In-memory fallback
+let memoryStorage = {};
+let memoryCounter = 0;
 
 (async () => {
     if (redisUrl) {
-        redisClient = redis.createClient({ url: redisUrl });
-        redisClient.on('error', (err) => console.log('Redis Client Error', err));
         try {
-            await redisClient.connect();
-            console.log('Succesvol verbonden met Redis.');
+            client = redis.createClient({ url: redisUrl });
+            client.on('error', (err) => {
+                console.error('Redis Client Error:', err);
+                isRedisConnected = false;
+            });
+            await client.connect();
+            isRedisConnected = true;
+            console.log('Successfully connected to Redis.');
         } catch (err) {
-            console.error('Kon niet verbinden met Redis:', err);
-            redisClient = null;
+            console.error('Failed to connect to Redis:', err);
+            isRedisConnected = false;
         }
     } else {
-        console.warn('REDIS_URL is niet ingesteld. Data wordt alleen in het geheugen opgeslagen.');
+        console.warn('REDIS_URL not found. Using in-memory storage as a fallback.');
     }
 })();
 
-app.use(cors());
-app.use(express.json());
-app.use(express.static(path.join(__dirname)));
-
-// Fallback in-memory opslag en teller
-let markersStore = {};
-let memoryCounter = 0;
+// Serve de frontend
+app.use(express.static(path.join(__dirname, 'public')));
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 
 // --- API ROUTES ---
 
-// POST: Sla een vlaggetje op met een server-gegenereerd ID
-app.post('/api/save-marker', async (req, res) => {
-    const { latitude, longitude } = req.body;
-    if (!latitude || !longitude) {
-        return res.status(400).json({ status: 'error', message: 'Ongeldige data.' });
-    }
-    
-    let newId;
-    let markerId;
-    const markerData = {
-        latitude: String(latitude),
-        longitude: String(longitude),
-        timestamp: new Date().toISOString()
-    };
+// Sla een nieuwe polygoon op
+app.post('/api/save-polygon', async (req, res) => {
+    const { points, projectName } = req.body; // Haal projectnaam uit de body
 
-    if (redisClient && redisClient.isReady) {
-        newId = await redisClient.incr('marker_id_counter');
-        markerId = `flag-${newId}`;
-        await redisClient.hSet(markerId, markerData);
-    } else {
-        memoryCounter++;
-        newId = memoryCounter;
-        markerId = `flag-${newId}`;
-        markersStore[markerId] = markerData;
+    if (!points || !Array.isArray(points) || points.length < 3) {
+        return res.status(400).json({ message: 'Invalid polygon data provided.' });
     }
-    
-    // Stuur de complete data, inclusief het nieuwe ID, terug
-    res.status(201).json({ status: 'success', data: { id: markerId, ...markerData } });
-});
 
-// GET: Haal alle vlaggetjes op
-app.get('/api/markers', async (req, res) => {
-    let allMarkers = {};
-    if (redisClient && redisClient.isReady) {
-        const keys = await redisClient.keys('flag-*');
-        for (const key of keys) {
-            allMarkers[key] = await redisClient.hGetAll(key);
+    try {
+        let newId;
+        const dataToStore = JSON.stringify({ points, projectName: projectName || 'N.v.t.' }); // Sla object op
+
+        if (isRedisConnected) {
+            newId = await client.incr('polygon_id_counter');
+            const polygonKey = `polygon-${newId}`;
+            await client.hSet('polygons', polygonKey, dataToStore);
+        } else {
+            newId = ++memoryCounter;
+            const polygonKey = `polygon-${newId}`;
+            memoryStorage[polygonKey] = JSON.parse(dataToStore);
         }
-    } else {
-        allMarkers = markersStore;
+        
+        const responseData = { id: `polygon-${newId}`, points, projectName: projectName || 'N.v.t.' };
+        res.status(201).json({ message: 'Polygon saved!', data: responseData });
+
+    } catch (error) {
+        console.error('Error saving polygon:', error);
+        res.status(500).json({ message: 'Failed to save polygon.' });
     }
-    res.status(200).json({ status: 'success', data: allMarkers });
 });
 
-// DELETE: Verwijder alle vlaggetjes en reset de teller
-app.delete('/api/markers', async (req, res) => {
-    if (redisClient && redisClient.isReady) {
-        const keys = await redisClient.keys('flag-*');
-        if (keys.length > 0) {
-            await redisClient.del(keys);
+
+// Haal alle polygonen op
+app.get('/api/polygons', async (req, res) => {
+    try {
+        let polygons = {};
+        if (isRedisConnected) {
+            const redisPolygons = await client.hGetAll('polygons');
+            // Parse de JSON strings terug naar objecten
+            for (const key in redisPolygons) {
+                polygons[key] = JSON.parse(redisPolygons[key]);
+            }
+        } else {
+            polygons = memoryStorage;
         }
-        // Reset ook de teller
-        await redisClient.set('marker_id_counter', '0');
-        console.log(`${keys.length} vlaggetjes en teller verwijderd uit Redis.`);
-    } else {
-        markersStore = {};
-        memoryCounter = 0;
-        console.log('Alle vlaggetjes en teller verwijderd uit geheugen (fallback).');
+        res.status(200).json({ data: polygons });
+    } catch (error) {
+        console.error('Error fetching polygons:', error);
+        res.status(500).json({ message: 'Failed to fetch polygons.' });
     }
-    res.status(200).json({ status: 'success', message: 'Alle vlaggetjes zijn succesvol verwijderd.' });
 });
 
-app.listen(port, () => {
-    console.log(`Node.js server draait op poort ${port}`);
+// Verwijder alle polygonen
+app.delete('/api/polygons', async (req, res) => {
+    try {
+        if (isRedisConnected) {
+            await client.del('polygons');
+            await client.del('polygon_id_counter');
+        } else {
+            memoryStorage = {};
+            memoryCounter = 0;
+        }
+        res.status(200).json({ message: 'All polygons deleted.' });
+    } catch (error) {
+        console.error('Error deleting polygons:', error);
+        res.status(500).json({ message: 'Failed to delete polygons.' });
+    }
+});
+
+
+// Start de server
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server is running on port ${PORT}`);
 });
