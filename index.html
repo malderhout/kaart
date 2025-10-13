@@ -73,7 +73,6 @@
 
         const coordinatesList = document.getElementById('coordinates-list');
         const deleteAllBtn = document.getElementById('delete-all-btn');
-        let markerCount = 0;
         let markersOnMap = []; // Array om L.marker objecten bij te houden
         const backendUrl = 'https://kaart-server.onrender.com'; 
 
@@ -83,19 +82,25 @@
 
         // --- FUNCTIES ---
 
-        function onMapClick(e) {
-            markerCount++;
+        async function onMapClick(e) {
             const lat = e.latlng.lat.toFixed(6);
             const lng = e.latlng.lng.toFixed(6);
-            addMarkerToMap(lat, lng, markerCount);
-            displayCoordinates(lat, lng, markerCount);
-            saveCoordinatesToBackend(lat, lng, markerCount);
+            
+            // Sla eerst op in de backend om een uniek ID te krijgen
+            const newMarkerData = await saveCoordinatesToBackend(lat, lng);
+
+            if (newMarkerData && newMarkerData.id) {
+                // Gebruik het ID dat we van de server hebben gekregen
+                const id = parseInt(newMarkerData.id.replace('flag-', ''));
+                addMarkerToMap(newMarkerData.latitude, newMarkerData.longitude, id);
+                displayCoordinates(newMarkerData.latitude, newMarkerData.longitude, id);
+            }
         }
 
         function addMarkerToMap(lat, lng, id) {
              const newMarker = L.marker([lat, lng]).addTo(map)
                 .bindPopup(`<b>Vlag ${id}</b><br>Lat: ${lat}<br>Lng: ${lng}`);
-             markersOnMap.push(newMarker); // Voeg marker toe aan de array
+             markersOnMap.push(newMarker);
              return newMarker;
         }
 
@@ -110,17 +115,24 @@
             coordinatesList.appendChild(listItem);
         }
 
-        async function saveCoordinatesToBackend(lat, lng, id) {
-            const data = { id: `flag-${id}`, latitude: lat, longitude: lng, timestamp: new Date().toISOString() };
+        async function saveCoordinatesToBackend(lat, lng) {
+            // We sturen geen ID meer, de server maakt deze aan
+            const data = { latitude: lat, longitude: lng };
             try {
                 const response = await fetch(`${backendUrl}/api/save-marker`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(data),
                 });
-                if (!response.ok) console.error('Fout bij opslaan:', response.statusText);
+                if (!response.ok) {
+                    console.error('Fout bij opslaan:', response.statusText);
+                    return null;
+                }
+                const result = await response.json();
+                return result.data; // Stuur de nieuwe marker data terug
             } catch (error) {
                 console.error('Netwerkfout:', error);
+                return null;
             }
         }
         
@@ -130,37 +142,30 @@
                 if (!response.ok) return;
                 const result = await response.json();
                 const markers = result.data;
-                let maxId = 0;
                 for (const key in markers) {
                     const markerData = markers[key];
                     const id = parseInt(key.replace('flag-', ''));
                     addMarkerToMap(markerData.latitude, markerData.longitude, id);
                     displayCoordinates(markerData.latitude, markerData.longitude, id);
-                    if (id > maxId) maxId = id;
                 }
-                markerCount = maxId;
             } catch (error) {
                 coordinatesList.innerHTML = '<p class="text-sm text-red-500">Kon server niet bereiken.</p>';
             }
         }
 
         function confirmDeleteAllMarkers() {
-            // Gebruik geen native confirm(), maak een custom melding.
             deleteAllBtn.textContent = 'Weet je het zeker?';
             deleteAllBtn.classList.replace('bg-red-500', 'bg-yellow-500');
             deleteAllBtn.classList.replace('hover:bg-red-600', 'hover:bg-yellow-600');
             
-            // Verander de functie van de knop tijdelijk
             deleteAllBtn.onclick = async () => {
                 await deleteAllMarkers();
-                // Herstel de knop
                 deleteAllBtn.textContent = 'Verwijder alle vlaggen';
                 deleteAllBtn.classList.replace('bg-yellow-500', 'bg-red-500');
                 deleteAllBtn.classList.replace('hover:bg-yellow-600', 'hover:bg-red-600');
-                deleteAllBtn.onclick = confirmDeleteAllMarkers; // Zet de oorspronkelijke listener terug
+                deleteAllBtn.onclick = confirmDeleteAllMarkers;
             };
 
-            // Voeg een timeout toe om de knop te herstellen als er niet wordt geklikt
             setTimeout(() => {
                 if (deleteAllBtn.textContent === 'Weet je het zeker?') {
                     deleteAllBtn.textContent = 'Verwijder alle vlaggen';
@@ -175,12 +180,9 @@
             try {
                 const response = await fetch(`${backendUrl}/api/markers`, { method: 'DELETE' });
                 if (response.ok) {
-                    // Verwijder markers van de kaart
                     markersOnMap.forEach(marker => map.removeLayer(marker));
-                    markersOnMap = []; // Leeg de array
-                    // Reset de UI
+                    markersOnMap = [];
                     coordinatesList.innerHTML = '<p class="text-sm text-gray-500 italic">Alle vlaggen zijn verwijderd.</p>';
-                    markerCount = 0;
                 } else {
                     console.error('Fout bij verwijderen:', response.statusText);
                 }
