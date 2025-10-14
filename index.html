@@ -54,12 +54,12 @@
     <div id="map"></div>
 
     <div class="control-panel">
-        <input type="text" id="project-name-input" placeholder="Projectnaam..." class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <input type="text" id="project-name-input" placeholder="Projectnaam (verplicht)..." class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
         <div id="info-list" class="space-y-2 bg-gray-50 p-2 rounded-md text-center">
              <p class="text-sm text-gray-500 italic">Gebruik de toolbar op de kaart om te tekenen.</p>
         </div>
         <button id="delete-all-btn" class="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-md transition-colors duration-200">
-            Verwijder alle vlakken
+            Verwijder alle vormen
         </button>
     </div>
 
@@ -81,69 +81,132 @@
         const drawControl = new L.Control.Draw({
             edit: {
                 featureGroup: drawnItems,
-                remove: true, // Zet verwijderen AAN
-                edit: false   // Bewerken blijft voor eenvoud uit
+                remove: true,
+                edit: false
             },
             draw: {
-                polyline: false, marker: false, circlemarker: false, circle: false,
-                polygon: { allowIntersection: false, shapeOptions: { color: '#e53e3e' } },
-                rectangle: { shapeOptions: { color: '#e53e3e' } }
+                polygon: { allowIntersection: false, shapeOptions: { color: '#e53e3e' } }, // rood
+                rectangle: { shapeOptions: { color: '#e53e3e' } }, // rood
+                polyline: { shapeOptions: { color: '#f357a1' } },    // roze
+                circle: { shapeOptions: { color: '#662d91' } },      // paars
+                marker: true,
+                circlemarker: false,
             }
         });
         map.addControl(drawControl);
 
         // --- EVENT LISTENERS ---
         map.on(L.Draw.Event.CREATED, (event) => {
+            const type = event.layerType;
             const layer = event.layer;
-            const points = layer.getLatLngs()[0].map(p => ({ lat: p.lat, lng: p.lng }));
-            const projectName = projectNameInput.value || 'N.v.t.';
-            savePolygon(points, projectName);
+            const projectName = projectNameInput.value.trim();
+            
+            // --- Validatie: Projectnaam is nu verplicht ---
+            if (!projectName) {
+                infoList.innerHTML = '<p class="text-sm text-red-500 font-semibold">Vul a.u.b. een projectnaam in.</p>';
+                projectNameInput.classList.add('border-red-500');
+                projectNameInput.focus();
+                // Verwijder de zojuist getekende laag, omdat deze niet wordt opgeslagen.
+                // Dit voorkomt een "spooklaag" op de kaart.
+                drawnItems.removeLayer(layer); 
+                return; // Stop de functie hier
+            }
+
+            let geometry;
+            switch (type) {
+                case 'polygon':
+                case 'rectangle':
+                    geometry = { points: layer.getLatLngs()[0].map(p => ({ lat: p.lat, lng: p.lng })) };
+                    break;
+                case 'polyline':
+                     geometry = { points: layer.getLatLngs().map(p => ({ lat: p.lat, lng: p.lng })) };
+                    break;
+                case 'circle':
+                    geometry = { center: layer.getLatLng(), radius: layer.getRadius() };
+                    break;
+                case 'marker':
+                    geometry = { point: layer.getLatLng() };
+                    break;
+            }
+            
+            // Omdat de laag tijdelijk wordt toegevoegd door de draw-plugin,
+            // verwijderen we 'm hier en laten we de `saveShape` functie de laag opnieuw toevoegen
+            // met de juiste popup en data nadat het is opgeslagen.
+            drawnItems.removeLayer(layer); 
+            saveShape(type, geometry, projectName);
         });
         
-        // Nieuw event voor het verwijderen van lagen
         map.on(L.Draw.Event.DELETED, (event) => {
             event.layers.eachLayer(layer => {
                 if (layer.backendId) {
-                    deleteSinglePolygonFromBackend(layer.backendId);
+                    deleteSingleShapeFromBackend(layer.backendId);
                 }
             });
         });
         
         deleteAllBtn.addEventListener('click', confirmDeleteAll);
+        
+        // Verwijder de rode rand bij het typen
+        projectNameInput.addEventListener('input', () => {
+            if (projectNameInput.value.trim() !== '') {
+                projectNameInput.classList.remove('border-red-500');
+            }
+        });
 
         // --- FUNCTIES ---
 
-        function addPolygonToMap(points, id, projectName) {
-            const layer = L.polygon(points.map(p => [p.lat, p.lng]), { color: '#e53e3e' })
-                .bindPopup(`<b>Project:</b> ${projectName || 'N.v.t.'}<br><b>Vlak ID:</b> ${id}`);
-            
-            // Koppel het backend ID aan de kaartlaag
-            layer.backendId = `polygon-${id}`;
-            
-            drawnItems.addLayer(layer);
-            return layer;
-        }
+        function addShapeToMap(type, geometry, id, projectName) {
+            let layer;
+            let popupContent = `<b>Project:</b> ${projectName || 'N.v.t.'}<br><b>ID:</b> ${id}`;
 
-        async function savePolygon(points, projectName) {
-            const newPolygonData = await savePolygonToBackend(points, projectName);
-            if (newPolygonData && newPolygonData.id) {
-                const id = parseInt(newPolygonData.id.replace('polygon-', ''));
-                addPolygonToMap(newPolygonData.points, id, newPolygonData.projectName);
-                displayPolygonInfo(id, projectName);
-                projectNameInput.value = '';
+            switch (type) {
+                case 'polygon':
+                case 'rectangle':
+                    layer = L.polygon(geometry.points.map(p => [p.lat, p.lng]), { color: '#e53e3e' });
+                    break;
+                case 'polyline':
+                    layer = L.polyline(geometry.points.map(p => [p.lat, p.lng]), { color: '#f357a1' });
+                    break;
+                case 'circle':
+                    layer = L.circle(geometry.center, { radius: geometry.radius, color: '#662d91' });
+                    popupContent += `<br><b>Radius:</b> ${geometry.radius.toFixed(2)}m`;
+                    break;
+                case 'marker':
+                    layer = L.marker(geometry.point);
+                    break;
+            }
+            
+            if (layer) {
+                layer.bindPopup(popupContent);
+                layer.backendId = `shape-${id}`;
+                drawnItems.addLayer(layer);
             }
         }
 
-        function displayPolygonInfo(id, projectName) {
-            infoList.innerHTML = `<p class="font-semibold text-gray-700">Vlak ${id} (${projectName || 'N.v.t.'}) opgeslagen</p>`;
+        async function saveShape(type, geometry, projectName) {
+            const newShapeData = await saveShapeToBackend(type, geometry, projectName);
+            if (newShapeData && newShapeData.id) {
+                const id = parseInt(newShapeData.id.replace('shape-', ''));
+                
+                addShapeToMap(newShapeData.type, newShapeData.geometry, id, newShapeData.projectName);
+
+                displayShapeInfo(id, type, projectName);
+                projectNameInput.value = '';
+                projectNameInput.classList.remove('border-red-500');
+            }
+        }
+
+        function displayShapeInfo(id, type, projectName) {
+            const typeNL = type.charAt(0).toUpperCase() + type.slice(1);
+            infoList.innerHTML = `<p class="font-semibold text-gray-700">${typeNL} ${id} (${projectName || 'N.v.t.'}) opgeslagen</p>`;
         }
         
-        async function savePolygonToBackend(points, projectName) {
+        async function saveShapeToBackend(type, geometry, projectName) {
             try {
-                const response = await fetch(`${backendUrl}/api/save-polygon`, {
+                const response = await fetch(`${backendUrl}/api/save-shape`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ points, projectName }),
+                    body: JSON.stringify({ type, geometry, projectName }),
                 });
                 if (!response.ok) throw new Error(response.statusText);
                 return (await response.json()).data;
@@ -154,30 +217,30 @@
             }
         }
         
-        // Nieuwe functie om één polygoon te verwijderen
-        async function deleteSinglePolygonFromBackend(polygonId) {
+        async function deleteSingleShapeFromBackend(shapeId) {
             try {
-                const response = await fetch(`${backendUrl}/api/polygons/${polygonId}`, {
+                const response = await fetch(`${backendUrl}/api/shapes/${shapeId}`, {
                     method: 'DELETE',
                 });
                  if (!response.ok) throw new Error(response.statusText);
-                infoList.innerHTML = `<p class="font-semibold text-gray-700">Vlak ${polygonId.replace('polygon-','')} verwijderd.</p>`;
+                infoList.innerHTML = `<p class="font-semibold text-gray-700">Vorm ${shapeId.replace('shape-','')} verwijderd.</p>`;
             } catch (error) {
-                console.error(`Fout bij verwijderen van ${polygonId}:`, error);
+                console.error(`Fout bij verwijderen van ${shapeId}:`, error);
                 infoList.innerHTML = '<p class="text-sm text-red-500">Verwijderen mislukt.</p>';
             }
         }
 
-        async function loadExistingPolygons() {
+        async function loadExistingShapes() {
             try {
-                const response = await fetch(`${backendUrl}/api/polygons`);
+                const response = await fetch(`${backendUrl}/api/shapes`);
                 if (!response.ok) return;
                 const result = await response.json();
-                const polygons = result.data;
-                for (const key in polygons) {
-                    const polygonData = polygons[key];
-                    const id = parseInt(key.replace('polygon-', ''));
-                    addPolygonToMap(polygonData.points, id, polygonData.projectName);
+                const shapes = result.data;
+                drawnItems.clearLayers();
+                for (const key in shapes) {
+                    const shapeData = shapes[key];
+                    const id = parseInt(key.replace('shape-', ''));
+                    addShapeToMap(shapeData.type, shapeData.geometry, id, shapeData.projectName);
                 }
             } catch (error) {
                 infoList.innerHTML = '<p class="text-sm text-red-500">Kon server niet bereiken.</p>';
@@ -188,26 +251,26 @@
              deleteAllBtn.textContent = 'Weet je het zeker?';
              deleteAllBtn.classList.replace('bg-red-500', 'bg-yellow-500');
              deleteAllBtn.onclick = async () => {
-                 await deleteAllPolygons();
-                 deleteAllBtn.textContent = 'Verwijder alle vlakken';
+                 await deleteAllShapes();
+                 deleteAllBtn.textContent = 'Verwijder alle vormen';
                  deleteAllBtn.classList.replace('bg-yellow-500', 'bg-red-500');
                  deleteAllBtn.onclick = confirmDeleteAll;
              };
         }
 
-        async function deleteAllPolygons() {
+        async function deleteAllShapes() {
             try {
-                const response = await fetch(`${backendUrl}/api/polygons`, { method: 'DELETE' });
+                const response = await fetch(`${backendUrl}/api/shapes`, { method: 'DELETE' });
                 if (response.ok) {
                     drawnItems.clearLayers();
-                    infoList.innerHTML = '<p class="text-sm text-gray-500 italic">Alle vlakken zijn verwijderd.</p>';
+                    infoList.innerHTML = '<p class="text-sm text-gray-500 italic">Alle vormen zijn verwijderd.</p>';
                 }
             } catch (error) {
                 console.error('Fout bij verwijderen:', error);
             }
         }
 
-        loadExistingPolygons();
+        loadExistingShapes();
     </script>
 </body>
 </html>

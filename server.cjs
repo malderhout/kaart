@@ -42,76 +42,81 @@ app.get('/', (req, res) => {
 
 // --- API ROUTES ---
 
-app.post('/api/save-polygon', async (req, res) => {
-    const { points, projectName } = req.body;
-    if (!points || !Array.isArray(points) || points.length < 3) {
-        return res.status(400).json({ message: 'Invalid polygon data provided.' });
+// Sla een nieuwe vorm op
+app.post('/api/save-shape', async (req, res) => {
+    const { type, geometry, projectName } = req.body;
+
+    if (!type || !geometry) {
+        return res.status(400).json({ message: 'Invalid shape data provided.' });
     }
+
     try {
         let newId;
-        const dataToStore = JSON.stringify({ points, projectName: projectName || 'N.v.t.' });
+        const dataToStore = JSON.stringify({ type, geometry, projectName: projectName || 'N.v.t.' });
         if (isRedisConnected) {
-            newId = await client.incr('polygon_id_counter');
-            await client.hSet('polygons', `polygon-${newId}`, dataToStore);
+            newId = await client.incr('shape_id_counter');
+            await client.hSet('shapes', `shape-${newId}`, dataToStore);
         } else {
             newId = ++memoryCounter;
-            memoryStorage[`polygon-${newId}`] = JSON.parse(dataToStore);
+            memoryStorage[`shape-${newId}`] = JSON.parse(dataToStore);
         }
-        const responseData = { id: `polygon-${newId}`, points, projectName: projectName || 'N.v.t.' };
-        res.status(201).json({ message: 'Polygon saved!', data: responseData });
+        const responseData = { id: `shape-${newId}`, type, geometry, projectName: projectName || 'N.v.t.' };
+        res.status(201).json({ message: 'Shape saved!', data: responseData });
     } catch (error) {
-        console.error('Error saving polygon:', error);
-        res.status(500).json({ message: 'Failed to save polygon.' });
+        console.error('Error saving shape:', error);
+        res.status(500).json({ message: 'Failed to save shape.' });
     }
 });
 
-app.get('/api/polygons', async (req, res) => {
+// Haal alle vormen op
+app.get('/api/shapes', async (req, res) => {
     try {
-        let polygons = {};
+        let shapes = {};
         if (isRedisConnected) {
-            const redisPolygons = await client.hGetAll('polygons');
-            for (const key in redisPolygons) {
-                polygons[key] = JSON.parse(redisPolygons[key]);
+            const redisShapes = await client.hGetAll('shapes');
+            for (const key in redisShapes) {
+                shapes[key] = JSON.parse(redisShapes[key]);
             }
         } else {
-            polygons = memoryStorage;
+            shapes = memoryStorage;
         }
-        res.status(200).json({ data: polygons });
+        res.status(200).json({ data: shapes });
     } catch (error) {
-        console.error('Error fetching polygons:', error);
-        res.status(500).json({ message: 'Failed to fetch polygons.' });
+        console.error('Error fetching shapes:', error);
+        res.status(500).json({ message: 'Failed to fetch shapes.' });
     }
 });
 
-// Nieuwe route om één polygoon te verwijderen
-app.delete('/api/polygons/:id', async (req, res) => {
+// Verwijder één vorm
+app.delete('/api/shapes/:id', async (req, res) => {
     const { id } = req.params;
     try {
         if (isRedisConnected) {
-            await client.hDel('polygons', id);
+            await client.hDel('shapes', id);
         } else {
             delete memoryStorage[id];
         }
-        res.status(200).json({ message: `Polygon ${id} deleted.` });
+        res.status(200).json({ message: `Shape ${id} deleted.` });
     } catch (error) {
-        console.error(`Error deleting polygon ${id}:`, error);
-        res.status(500).json({ message: `Failed to delete polygon ${id}.` });
+        console.error(`Error deleting shape ${id}:`, error);
+        res.status(500).json({ message: `Failed to delete shape ${id}.` });
     }
 });
 
-app.delete('/api/polygons', async (req, res) => {
+// Verwijder alle vormen
+app.delete('/api/shapes', async (req, res) => {
     try {
         if (isRedisConnected) {
-            await client.del('polygons');
-            await client.del('polygon_id_counter');
+            await client.del('shapes');
+            await client.del('shape_id_counter');
         } else {
             memoryStorage = {};
             memoryCounter = 0;
         }
-        res.status(200).json({ message: 'All polygons deleted.' });
+        res.status(200).json({ message: 'All shapes deleted.' });
     } catch (error) {
-        console.error('Error deleting polygons:', error);
-        res.status(500).json({ message: 'Failed to delete polygons.' });
+        console.error('Error deleting shapes:', error);
+        res.status(500).json({ message: 'Failed to delete shapes.' });
     }
 });
 
