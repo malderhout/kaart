@@ -2,7 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const redis = require('redis');
 const path = require('path');
-const fetch = require('node-fetch'); // Importeer node-fetch
+// De 'node-fetch' bibliotheek is niet meer nodig en is verwijderd.
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -43,10 +43,11 @@ app.get('/', (req, res) => {
 
 // --- API ROUTES ---
 
-// Nieuwe proxy-route voor WFS data om CORS te omzeilen
+// Proxy-route voor WFS data om CORS te omzeilen
 app.get('/api/parkeervakken', async (req, res) => {
     const wfsUrl = 'https://maps.amsterdam.nl/open_geodata/WFS?SERVICE=WFS&VERSION=1.1.0&REQUEST=GetFeature&TYPENAME=VBA_PARKEERVAK&outputFormat=application/json&srsName=EPSG:4326';
     try {
+        // Gebruik de ingebouwde fetch van Node.js
         const response = await fetch(wfsUrl);
         if (!response.ok) {
             throw new Error(`WFS server responded with status: ${response.status}`);
