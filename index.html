@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Teken Vlakken op de Kaart</title>
+    <!-- Oplossing voor favicon.ico 404 error -->
+    <link rel="icon" href="data:;base64,iVBORw0KGgo=">
     <script src="https://cdn.tailwindcss.com"></script>
     
     <!-- LeafletJS CSS & JS -->
@@ -248,14 +250,18 @@
         
         // --- Nieuwe functie om WFS data te laden ---
         async function loadWfsParkeervakken() {
-            // Let op: dit laadt ALLE parkeervakken en kan traag zijn.
-            const wfsUrl = 'https://map.data.amsterdam.nl/maps/parkeervakken?service=WFS&version=1.0.0&request=GetFeature&typeName=parkeervakken&outputFormat=application/json&srsName=EPSG:4326';
+            // FIX: Haal data op via onze eigen backend-proxy om CORS te omzeilen.
+            const wfsUrl = `${backendUrl}/api/parkeervakken`;
             
             infoList.innerHTML = '<p class="text-sm text-gray-500 italic">Laden van parkeervakken...</p>';
 
             try {
                 const response = await fetch(wfsUrl);
-                if (!response.ok) throw new Error(`Server status: ${response.status}`);
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`Server status: ${response.status}. Response: ${errorText}`);
+                }
+                // De proxy stuurt al JSON door, dus we kunnen dit direct gebruiken.
                 const data = await response.json();
                 
                 L.geoJSON(data, {
@@ -263,7 +269,6 @@
                         return { color: "#007bff", weight: 1, opacity: 0.7 }; // Stijl voor de parkeervakken
                     },
                     onEachFeature: function(feature, layer) {
-                        // Voeg een popup toe met de beschikbare data
                         if (feature.properties) {
                             let popupText = "<b>Parkeervak</b><br>";
                             for (const key in feature.properties) {

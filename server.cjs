@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const redis = require('redis');
 const path = require('path');
+const fetch = require('node-fetch'); // Importeer node-fetch
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -42,7 +43,23 @@ app.get('/', (req, res) => {
 
 // --- API ROUTES ---
 
-// Sla een nieuwe vorm op
+// Nieuwe proxy-route voor WFS data om CORS te omzeilen
+app.get('/api/parkeervakken', async (req, res) => {
+    const wfsUrl = 'https://maps.amsterdam.nl/open_geodata/WFS?SERVICE=WFS&VERSION=1.1.0&REQUEST=GetFeature&TYPENAME=VBA_PARKEERVAK&outputFormat=application/json&srsName=EPSG:4326';
+    try {
+        const response = await fetch(wfsUrl);
+        if (!response.ok) {
+            throw new Error(`WFS server responded with status: ${response.status}`);
+        }
+        const data = await response.json();
+        res.json(data);
+    } catch (error) {
+        console.error('Error proxying WFS request:', error);
+        res.status(500).json({ message: 'Failed to fetch WFS data.' });
+    }
+});
+
+
 app.post('/api/save-shape', async (req, res) => {
     const { type, geometry, projectName } = req.body;
 
@@ -68,7 +85,6 @@ app.post('/api/save-shape', async (req, res) => {
     }
 });
 
-// Haal alle vormen op
 app.get('/api/shapes', async (req, res) => {
     try {
         let shapes = {};
@@ -87,7 +103,6 @@ app.get('/api/shapes', async (req, res) => {
     }
 });
 
-// Verwijder één vorm
 app.delete('/api/shapes/:id', async (req, res) => {
     const { id } = req.params;
     try {
@@ -103,7 +118,6 @@ app.delete('/api/shapes/:id', async (req, res) => {
     }
 });
 
-// Verwijder alle vormen
 app.delete('/api/shapes', async (req, res) => {
     try {
         if (isRedisConnected) {
